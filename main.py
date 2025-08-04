@@ -11,6 +11,7 @@ app = Flask(__name__)
 
 # Configuration
 DOWNLOAD_FOLDER = os.path.join(os.getcwd(), 'public', 'downloads')
+COOKIES_FILE = os.path.join(os.getcwd(), 'cookies.txt')
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 
 # Ensure download folder exists
@@ -733,6 +734,11 @@ def download_video():
             'writesubtitles': False,
         }
         
+        # Add cookies if cookies.txt file exists
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts['cookiefile'] = COOKIES_FILE
+            print(f"🍪 Using cookies from: {COOKIES_FILE}")
+        
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # Extract info first to get title
@@ -798,16 +804,28 @@ def serve_public_file(filename):
 
 @app.route('/health')
 def health_check():
+    cookies_status = "Found" if os.path.exists(COOKIES_FILE) else "Not found"
     return jsonify({
         'status': 'healthy', 
         'message': 'YouTube Downloader API is running',
         'download_folder': DOWNLOAD_FOLDER,
+        'cookies_file': COOKIES_FILE,
+        'cookies_status': cookies_status,
         'total_videos': len(list(Path(DOWNLOAD_FOLDER).glob("*")))
     })
 
 if __name__ == '__main__':
     # Ensure download folder exists
     os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+    
+    # Check for cookies file
+    if os.path.exists(COOKIES_FILE):
+        print(f"🍪 Cookies file found: {COOKIES_FILE}")
+        print(f"   This will help with restricted/private videos")
+    else:
+        print(f"ℹ️  No cookies file found at: {COOKIES_FILE}")
+        print(f"   To use cookies, place your cookies.txt file in the project root")
+        print(f"   This helps with age-restricted, private, or region-blocked videos")
     
     print(f"📁 Downloads will be stored in: {DOWNLOAD_FOLDER}")
     print(f"🌐 Access the app at: http://localhost:5000")
