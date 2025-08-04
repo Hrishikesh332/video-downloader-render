@@ -8,7 +8,7 @@ import json
 app = Flask(__name__)
 
 TEMP_DOWNLOAD_BASE_DIR = "/tmp/yt_dlp_downloads"
-COOKIE_FILE_PATH = os.environ.get('YT_DLP_COOKIE_FILE')
+COOKIE_FILE_PATH = os.environ.get('YT_DLP_COOKIE_FILE', '/etc/secrets/cookies.txt')
 
 if not os.path.exists(TEMP_DOWNLOAD_BASE_DIR):
     os.makedirs(TEMP_DOWNLOAD_BASE_DIR)
@@ -18,16 +18,21 @@ def home():
     return render_template('index.html')
 
 def get_cookie_path():
+    app.logger.info(f"Looking for cookies at: {COOKIE_FILE_PATH}")
+    
     if COOKIE_FILE_PATH and os.path.exists(COOKIE_FILE_PATH):
-        temp_cookie_path = '/etc/secrets/cookies.txt'
+        app.logger.info(f"Found cookies file at: {COOKIE_FILE_PATH}")
+        # Use temp directory that's guaranteed to be writable
+        temp_cookie_path = os.path.join(TEMP_DOWNLOAD_BASE_DIR, 'cookies.txt')
         try:
             shutil.copy(COOKIE_FILE_PATH, temp_cookie_path)
-            app.logger.info(f"Copied cookie file to writable path: {temp_cookie_path}")
+            app.logger.info(f"Successfully copied cookies to writable path: {temp_cookie_path}")
             return temp_cookie_path
         except Exception as e:
-            app.logger.error(f"Failed to copy cookie file: {e}")
+            app.logger.error(f"Failed to copy cookie file from {COOKIE_FILE_PATH} to {temp_cookie_path}: {e}")
+            app.logger.info("Proceeding without cookies due to copy failure")
     else:
-        app.logger.warning("COOKIE_FILE_PATH not set or file does not exist.")
+        app.logger.info(f"Cookies file not found at {COOKIE_FILE_PATH} - proceeding without cookies.")
     return None
 
 @app.route('/get_info', methods=['GET'])
@@ -42,9 +47,9 @@ def get_info():
             '-J',
             '--no-warnings',
             '--verbose',
-            '--sleep-requests', '1.25',
-            '--min-sleep-interval', '60',
-            '--max-sleep-interval', '90',
+            '--sleep-requests', '0.5',
+            '--min-sleep-interval', '1',
+            '--max-sleep-interval', '3',
             '--no-playlist'
 
         ]
@@ -95,12 +100,16 @@ def handle_download(video_url, download_type):
         'yt-dlp',
         '--no-warnings',
         '--verbose',
-        '--sleep-requests', '1.25',
-        '--min-sleep-interval', '60',
-        '--max-sleep-interval', '90',
+        '--sleep-requests', '0.5',
+        '--min-sleep-interval', '1',
+        '--max-sleep-interval', '3',
         '--no-playlist',
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        '--output', output_template
+        '--output', output_template,
+        '--no-check-certificate',
+        '--prefer-free-formats',
+        '--max-filesize', '100M',  # Limit file size for cloud deployment
+        '--socket-timeout', '30'
     ]
 
     temp_cookie_path = get_cookie_path()
@@ -110,9 +119,16 @@ def handle_download(video_url, download_type):
         app.logger.info("Proceeding without cookies.")
 
     if download_type == 'video':
-        command.extend(['-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best'])
+        # More robust format selection for cloud deployment
+        command.extend(['-f', 'best[ext=mp4][height<=720]/best[height<=720]/best'])
     elif download_type == 'audio':
-        command.extend(['-x', '--audio-format', 'mp3', '--audio-quality', '0'])
+        # Check if ffmpeg is available
+        if shutil.which("ffmpeg"):
+            command.extend(['-x', '--audio-format', 'mp3', '--audio-quality', '192'])
+        else:
+            # Fallback: download best audio format without conversion
+            app.logger.warning("FFmpeg not available, downloading audio without conversion")
+            command.extend(['-f', 'bestaudio[ext=m4a]/bestaudio'])
 
     command.append(video_url)
 
@@ -127,12 +143,30 @@ def handle_download(video_url, download_type):
         downloaded_files = os.listdir(specific_download_dir)
         if not downloaded_files:
             shutil.rmtree(specific_download_dir)
+            
+            # Provide more specific error messages for common cloud deployment issues
+            error_msg = f"yt-dlp {download_type} download failed or produced no file."
+            stderr_lower = process.stderr.lower() if process.stderr else ""
+            
+            if "http error 429" in stderr_lower:
+                error_msg = "YouTube rate limiting detected. Please wait a few minutes and try again."
+            elif "unable to download webpage" in stderr_lower:
+                error_msg = "Unable to access YouTube. This might be due to network restrictions or rate limiting."
+            elif "ffmpeg" in stderr_lower and "not found" in stderr_lower:
+                error_msg = "Audio conversion failed. FFmpeg might not be available on this server."
+            elif "timeout" in stderr_lower:
+                error_msg = "Download timed out. Try again with a shorter video."
+            elif "file size exceeds" in stderr_lower:
+                error_msg = "Video file is too large (>100MB limit). Try downloading audio instead."
+                
             return jsonify({
-                "error": f"yt-dlp {download_type} download failed or produced no file.",
+                "error": error_msg,
                 "returncode": process.returncode,
-                "stdout": process.stdout,
-                "stderr": process.stderr,
-                "expected_dir": specific_download_dir
+                "debug_info": {
+                    "stdout": process.stdout[-500:] if process.stdout else "",  # Last 500 chars
+                    "stderr": process.stderr[-500:] if process.stderr else "",   # Last 500 chars
+                    "expected_dir": specific_download_dir
+                }
             }), 500
 
         downloaded_filename = downloaded_files[0]
@@ -158,7 +192,7 @@ def handle_download(video_url, download_type):
             return response
 
         return send_from_directory(directory=specific_download_dir, path=downloaded_filename, as_attachment=True)
-
+        
     except Exception as e:
         shutil.rmtree(specific_download_dir)
         return jsonify({
@@ -175,6 +209,37 @@ def download_video_route():
 def download_audio_route():
     video_url = request.args.get('url')
     return handle_download(video_url, 'audio')
+
+@app.route('/test_download')
+def test_download():
+    """Test endpoint with a known working video"""
+    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll - should always work
+    return handle_download(test_url, 'audio')
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for debugging deployment issues"""
+    
+    health_info = {
+        "status": "healthy",
+        "temp_dir": TEMP_DOWNLOAD_BASE_DIR,
+        "temp_dir_exists": os.path.exists(TEMP_DOWNLOAD_BASE_DIR),
+        "temp_dir_writable": os.access(TEMP_DOWNLOAD_BASE_DIR, os.W_OK) if os.path.exists(TEMP_DOWNLOAD_BASE_DIR) else False,
+        "cookie_file_env": COOKIE_FILE_PATH,
+        "cookie_file_exists": os.path.exists(COOKIE_FILE_PATH) if COOKIE_FILE_PATH else False,
+        "ffmpeg_available": shutil.which("ffmpeg") is not None,
+        "yt_dlp_version": None
+    }
+    
+    # Check yt-dlp version
+    try:
+        result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            health_info["yt_dlp_version"] = result.stdout.strip()
+    except:
+        health_info["yt_dlp_version"] = "Error checking version"
+    
+    return jsonify(health_info)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

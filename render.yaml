@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: youtube-downloader
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: PORT
+        value: 8080
+      - key: YT_DLP_COOKIE_FILE
+        value: /etc/secrets/cookies.txt 
