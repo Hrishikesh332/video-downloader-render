@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 import json
 from datetime import datetime
-import os   
+import os
 import requests
 
 app = Flask(__name__)

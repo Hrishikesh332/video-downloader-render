@@ -2,3 +2,4 @@ Flask
 yt-dlp
 Werkzeug
 gunicorn
+requests
