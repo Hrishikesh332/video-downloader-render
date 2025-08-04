@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .logo {
+            text-align: center;
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="url"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e1e1e1;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            flex: 1;
+            min-width: 150px;
+            padding: 15px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn-info {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-video {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-audio {
+            background: #ed8936;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: 500;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .result.success {
+            background: #f0fff4;
+            border: 1px solid #9ae6b4;
+            color: #22543d;
+        }
+
+        .result.error {
+            background: #fed7d7;
+            border: 1px solid #fc8181;
+            color: #742a2a;
+        }
+
+        .result.info {
+            background: #ebf8ff;
+            border: 1px solid #90cdf4;
+            color: #1a365d;
+        }
+
+        .video-info {
+            margin-top: 15px;
+        }
+
+        .video-info h3 {
+            margin-bottom: 10px;
+            color: #2d3748;
+        }
+
+        .video-info p {
+            margin-bottom: 5px;
+            color: #4a5568;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 600px) {
+            .button-group {
+                flex-direction: column;
+            }
+            
+            .btn {
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🎬</div>
+        <h1>YouTube Downloader</h1>
+        
+        <div class="form-group">
+            <label for="videoUrl">YouTube URL:</label>
+            <input type="url" id="videoUrl" placeholder="https://www.youtube.com/watch?v=..." required>
+        </div>
+        
+        <div class="button-group">
+            <button class="btn btn-info" onclick="getVideoInfo()">
+                📋 Get Video Info
+            </button>
+            <button class="btn btn-video" onclick="downloadVideo()">
+                🎥 Download Video
+            </button>
+            <button class="btn btn-audio" onclick="downloadAudio()">
+                🎵 Download Audio
+            </button>
+        </div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <span id="loadingText">Processing...</span>
+        </div>
+        
+        <div class="result" id="result"></div>
+        
+        <div class="footer">
+            <p>Enter a YouTube URL above and choose an action</p>
+            <p>Powered by yt-dlp API</p>
+        </div>
+    </div>
+
+    <script>
+        function getVideoUrl() {
+            const url = document.getElementById('videoUrl').value.trim();
+            if (!url) {
+                showError('Please enter a YouTube URL');
+                return null;
+            }
+            return url;
+        }
+
+        function showLoading(text = 'Processing...') {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loadingText').textContent = text;
+            document.getElementById('result').style.display = 'none';
+            
+            // Disable all buttons
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(btn => btn.disabled = true);
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+            
+            // Re-enable all buttons
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(btn => btn.disabled = false);
+        }
+
+        function showResult(content, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = content;
+            resultDiv.className = `result ${type}`;
+            resultDiv.style.display = 'block';
+            hideLoading();
+        }
+
+        function showError(message) {
+            showResult(`<strong>Error:</strong> ${message}`, 'error');
+        }
+
+        function showSuccess(message) {
+            showResult(`<strong>Success:</strong> ${message}`, 'success');
+        }
+
+        async function getVideoInfo() {
+            const url = getVideoUrl();
+            if (!url) return;
+
+            showLoading('Getting video information...');
+
+            try {
+                const response = await fetch(`/get_info?url=${encodeURIComponent(url)}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    const info = `
+                        <div class="video-info">
+                            <h3>📺 Video Information</h3>
+                            <p><strong>Title:</strong> ${data.title || 'N/A'}</p>
+                            <p><strong>Duration:</strong> ${formatDuration(data.duration) || 'N/A'}</p>
+                            <p><strong>Uploader:</strong> ${data.uploader || 'N/A'}</p>
+                            <p><strong>View Count:</strong> ${formatNumber(data.view_count) || 'N/A'}</p>
+                            <p><strong>Upload Date:</strong> ${formatDate(data.upload_date) || 'N/A'}</p>
+                            <p><strong>Description:</strong> ${(data.description || '').substring(0, 200)}${data.description && data.description.length > 200 ? '...' : ''}</p>
+                        </div>
+                    `;
+                    showResult(info, 'info');
+                } else {
+                    showError(data.error || 'Failed to get video information');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function downloadVideo() {
+            const url = getVideoUrl();
+            if (!url) return;
+
+            showLoading('Downloading video...');
+
+            try {
+                const response = await fetch(`/download_video?url=${encodeURIComponent(url)}`);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const filename = getFilenameFromResponse(response) || 'video.mp4';
+                    downloadBlob(blob, filename);
+                    showSuccess('Video downloaded successfully!');
+                } else {
+                    const errorData = await response.json();
+                    showError(errorData.error || 'Failed to download video');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function downloadAudio() {
+            const url = getVideoUrl();
+            if (!url) return;
+
+            showLoading('Downloading audio...');
+
+            try {
+                const response = await fetch(`/download_audio?url=${encodeURIComponent(url)}`);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const filename = getFilenameFromResponse(response) || 'audio.mp3';
+                    downloadBlob(blob, filename);
+                    showSuccess('Audio downloaded successfully!');
+                } else {
+                    const errorData = await response.json();
+                    showError(errorData.error || 'Failed to download audio');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        function getFilenameFromResponse(response) {
+            const contentDisposition = response.headers.get('content-disposition');
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                if (filenameMatch) {
+                    return filenameMatch[1].replace(/['"]/g, '');
+                }
+            }
+            return null;
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return null;
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            
+            if (hours > 0) {
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                return `${minutes}:${secs.toString().padStart(2, '0')}`;
+            }
+        }
+
+        function formatNumber(num) {
+            if (!num) return null;
+            return new Intl.NumberFormat().format(num);
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return null;
+            const year = dateStr.substring(0, 4);
+            const month = dateStr.substring(4, 6);
+            const day = dateStr.substring(6, 8);
+            return `${year}-${month}-${day}`;
+        }
+
+        // Allow Enter key to trigger get info
+        document.getElementById('videoUrl').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                getVideoInfo();
+            }
+        });
+    </script>
+</body>
+</html> 

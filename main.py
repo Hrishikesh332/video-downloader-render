@@ -1,7 +1,7 @@
 import os
 import shutil
 import uuid
-from flask import Flask, request, jsonify, send_from_directory, after_this_request
+from flask import Flask, request, jsonify, send_from_directory, after_this_request, render_template
 import subprocess
 import json
 
@@ -15,15 +15,7 @@ if not os.path.exists(TEMP_DOWNLOAD_BASE_DIR):
 
 @app.route('/')
 def home():
-    return """
-    <h1>yt-dlp on Render POC</h1>
-    <p>Use the following endpoints:</p>
-    <ul>
-        <li><code>/get_info?url=YOUR_YOUTUBE_URL</code> - to get video metadata as JSON.</li>
-        <li><code>/download_video?url=YOUR_YOUTUBE_URL</code> - to download the best quality video.</li>
-        <li><code>/download_audio?url=YOUR_YOUTUBE_URL</code> - to download the best quality audio as MP3.</li>
-    </ul>
-    """
+    return render_template('index.html')
 
 def get_cookie_path():
     if COOKIE_FILE_PATH and os.path.exists(COOKIE_FILE_PATH):
@@ -52,9 +44,7 @@ def get_info():
             '--verbose',
             '--sleep-requests', '1.25',
             '--min-sleep-interval', '60',
-            '--max-sleep-interval', '90'
-            '--no-check-formats',
-            '--force-generic-extractor',
+            '--max-sleep-interval', '90',
             '--no-playlist'
 
         ]
@@ -108,10 +98,8 @@ def handle_download(video_url, download_type):
         '--sleep-requests', '1.25',
         '--min-sleep-interval', '60',
         '--max-sleep-interval', '90',
-        '--no-check-formats',
-        '--force-generic-extractor',
         '--no-playlist',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         '--output', output_template
     ]
 
