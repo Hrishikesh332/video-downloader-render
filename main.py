@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_file, render_template_string, send_from_directory
 import yt_dlp
-import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -616,6 +616,21 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
+
+def is_valid_youtube_url(url):
+    """Validate if the URL is a valid YouTube URL"""
+    youtube_patterns = [
+        r'(https?://)?(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/',
+        r'(https?://)?(www\.)?m\.youtube\.com/',
+        r'(https?://)?(www\.)?gaming\.youtube\.com/',
+        r'(https?://)?(www\.)?music\.youtube\.com/',
+        r'(https?://)?(www\.)?youtube\.googleapis\.com/'
+    ]
+    
+    for pattern in youtube_patterns:
+        if re.match(pattern, url, re.IGNORECASE):
+            return True
+    return False
 
 def cleanup_old_files():
     """Clean up old downloaded files (older than 24 hours)"""
