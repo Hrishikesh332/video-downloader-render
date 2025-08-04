@@ -1,5 +1,4 @@
 Flask
-yt-dlp==2025.07.21
-Werkzeug
+yt-dlp
+curl_cffi
 gunicorn
-requests
