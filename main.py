@@ -63,10 +63,14 @@ def get_info():
         command.append(video_url)
 
         app.logger.info(f"Running get_info command: {' '.join(command)}")
-        process = subprocess.run(command, capture_output=True, text=True, check=True)
+        process = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
         video_info = json.loads(process.stdout)
         return jsonify(video_info)
 
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "error": "Video info extraction timed out (15 second limit). The video might be unavailable or restricted.",
+        }), 408
     except subprocess.CalledProcessError as e:
         app.logger.error(f"get_info yt-dlp failed: {e.stderr}")
         return jsonify({
@@ -108,8 +112,11 @@ def handle_download(video_url, download_type):
         '--output', output_template,
         '--no-check-certificate',
         '--prefer-free-formats',
-        '--max-filesize', '100M',  # Limit file size for cloud deployment
-        '--socket-timeout', '30'
+        '--max-filesize', '25M',  # Smaller limit for faster cloud deployment
+        '--socket-timeout', '15',
+        '--fragment-retries', '2',
+        '--retries', '2',
+        '--file-access-retries', '2'
     ]
 
     temp_cookie_path = get_cookie_path()
@@ -119,8 +126,8 @@ def handle_download(video_url, download_type):
         app.logger.info("Proceeding without cookies.")
 
     if download_type == 'video':
-        # More robust format selection for cloud deployment
-        command.extend(['-f', 'best[ext=mp4][height<=720]/best[height<=720]/best'])
+        # Optimized format selection for fast cloud deployment
+        command.extend(['-f', 'best[ext=mp4][height<=480][filesize<=50M]/best[height<=480]/worst[ext=mp4]/worst'])
     elif download_type == 'audio':
         # Check if ffmpeg is available
         if shutil.which("ffmpeg"):
@@ -134,7 +141,8 @@ def handle_download(video_url, download_type):
 
     try:
         app.logger.info(f"Running download command: {' '.join(command)}")
-        process = subprocess.run(command, capture_output=True, text=True)
+        # Add timeout for cloud deployment (Render has ~30s request timeout)
+        process = subprocess.run(command, capture_output=True, text=True, timeout=25)
 
         app.logger.info(f"Download stdout: {process.stdout}")
         if process.stderr:
@@ -157,7 +165,7 @@ def handle_download(video_url, download_type):
             elif "timeout" in stderr_lower:
                 error_msg = "Download timed out. Try again with a shorter video."
             elif "file size exceeds" in stderr_lower:
-                error_msg = "Video file is too large (>100MB limit). Try downloading audio instead."
+                error_msg = "Video file is too large (>25MB limit). Try downloading audio instead or a shorter video."
                 
             return jsonify({
                 "error": error_msg,
@@ -193,6 +201,12 @@ def handle_download(video_url, download_type):
 
         return send_from_directory(directory=specific_download_dir, path=downloaded_filename, as_attachment=True)
         
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(specific_download_dir)
+        return jsonify({
+            "error": "Download timed out (25 second limit). Try a shorter video or audio-only download.",
+            "suggestion": "For longer videos, try downloading audio instead of video."
+        }), 408
     except Exception as e:
         shutil.rmtree(specific_download_dir)
         return jsonify({
@@ -215,6 +229,71 @@ def test_download():
     """Test endpoint with a known working video"""
     test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll - should always work
     return handle_download(test_url, 'audio')
+
+@app.route('/quick_audio', methods=['GET'])
+def quick_audio_download():
+    """Ultra-fast audio download with minimal quality for testing"""
+    video_url = request.args.get('url')
+    if not video_url:
+        return jsonify({"error": "Missing 'url' parameter"}), 400
+
+    download_id = str(uuid.uuid4())
+    specific_download_dir = os.path.join(TEMP_DOWNLOAD_BASE_DIR, download_id)
+    os.makedirs(specific_download_dir, exist_ok=True)
+
+    output_template = os.path.join(specific_download_dir, "%(title)s.%(ext)s")
+    
+    # Ultra-fast settings for quick testing
+    command = [
+        'yt-dlp',
+        '--no-warnings',
+        '--no-playlist',
+        '--socket-timeout', '10',
+        '--retries', '1',
+        '--max-filesize', '10M',
+        '--output', output_template,
+        '-f', 'worstaudio[ext=m4a]/worstaudio',  # Fastest audio download
+        video_url
+    ]
+
+    temp_cookie_path = get_cookie_path()
+    if temp_cookie_path:
+        command.extend(['--cookies', temp_cookie_path])
+
+    try:
+        app.logger.info(f"Running quick audio command: {' '.join(command)}")
+        process = subprocess.run(command, capture_output=True, text=True, timeout=15)
+
+        downloaded_files = os.listdir(specific_download_dir)
+        if not downloaded_files:
+            shutil.rmtree(specific_download_dir)
+            return jsonify({
+                "error": "Quick audio download failed. Try the regular audio download.",
+                "stderr": process.stderr[-200:] if process.stderr else ""
+            }), 500
+
+        downloaded_filename = downloaded_files[0]
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                shutil.rmtree(specific_download_dir)
+            except Exception as e:
+                app.logger.error(f"Cleanup error: {e}")
+            return response
+
+        return send_from_directory(directory=specific_download_dir, path=downloaded_filename, as_attachment=True)
+
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(specific_download_dir)
+        return jsonify({
+            "error": "Even quick download timed out. Video might be restricted or unavailable.",
+        }), 408
+    except Exception as e:
+        shutil.rmtree(specific_download_dir)
+        return jsonify({
+            "error": f"Quick download error: {str(e)}"
+        }), 500
 
 @app.route('/health')
 def health_check():

@@ -77,7 +77,7 @@
 
         .btn {
             flex: 1;
-            min-width: 150px;
+            min-width: 120px;
             padding: 15px 20px;
             border: none;
             border-radius: 8px;
@@ -102,6 +102,11 @@
 
         .btn-audio {
             background: #ed8936;
+            color: white;
+        }
+
+        .btn-quick {
+            background: #9f7aea;
             color: white;
         }
 
@@ -220,6 +225,9 @@
             <button class="btn btn-audio" onclick="downloadAudio()">
                 🎵 Download Audio
             </button>
+            <button class="btn btn-quick" onclick="quickAudioDownload()" title="Fast download with minimal quality for testing">
+                ⚡ Quick Audio
+            </button>
         </div>
         
         <div class="loading" id="loading">
@@ -231,7 +239,8 @@
         
         <div class="footer">
             <p>Enter a YouTube URL above and choose an action</p>
-            <p>Powered by yt-dlp API</p>
+            <p><strong>Tip:</strong> Try "Quick Audio" first for fast testing on cloud deployments</p>
+            <p>Powered by yt-dlp API • Optimized for cloud deployment</p>
         </div>
     </div>
 
@@ -350,6 +359,29 @@
                 } else {
                     const errorData = await response.json();
                     showError(errorData.error || 'Failed to download audio');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function quickAudioDownload() {
+            const url = getVideoUrl();
+            if (!url) return;
+
+            showLoading('Quick audio download (minimal quality)...');
+
+            try {
+                const response = await fetch(`/quick_audio?url=${encodeURIComponent(url)}`);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const filename = getFilenameFromResponse(response) || 'audio.m4a';
+                    downloadBlob(blob, filename);
+                    showSuccess('Quick audio downloaded successfully! (Minimal quality for testing)');
+                } else {
+                    const errorData = await response.json();
+                    showError(errorData.error || 'Quick audio download failed');
                 }
             } catch (error) {
                 showError('Network error: ' + error.message);
