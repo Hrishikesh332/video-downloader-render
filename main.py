@@ -734,10 +734,13 @@ def download_video():
             'writesubtitles': False,
         }
         
-        # Add cookies if cookies.txt file exists
-        if os.path.exists(COOKIES_FILE):
-            ydl_opts['cookiefile'] = COOKIES_FILE
-            print(f"🍪 Using cookies from: {COOKIES_FILE}")
+        # Check if cookies.txt file exists (REQUIRED)
+        if not os.path.exists(COOKIES_FILE):
+            return jsonify({'error': 'cookies.txt file is required but not found. Please place your cookies.txt file in the project root directory.'}), 400
+        
+        # Use cookies for all downloads
+        ydl_opts['cookiefile'] = COOKIES_FILE
+        print(f"🍪 Using cookies from: {COOKIES_FILE}")
         
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
