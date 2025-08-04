@@ -762,6 +762,33 @@ def download_video():
             'fragment_retries': 3,
             'no_warnings': False,
             'ignoreerrors': False,
+            # Enhanced anti-bot detection measures
+            'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'referer': 'https://www.youtube.com/',
+            'http_headers': {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Cache-Control': 'max-age=0',
+            },
+            # Rate limiting and retry strategy
+            'sleep_interval': 2,
+            'max_sleep_interval': 10,
+            'sleep_interval_subtitles': 2,
+            # Additional bypass options
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls'],
+                    'player_client': ['android', 'web'],
+                }
+            },
         }
         
         # Use cookies if available (OPTIONAL)
@@ -771,9 +798,10 @@ def download_video():
         else:
             print("ℹ️  No cookies file found - downloading without cookies (may limit access to some videos)")
         
-        # Download the video
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
+        # Try downloading with primary method
+        video_title = "video"
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Extract info first to get title
                 print(f"📺 Extracting video info from: {url}")
                 info = ydl.extract_info(url, download=False)
@@ -785,9 +813,38 @@ def download_video():
                 ydl.download([url])
                 print(f"✅ Download completed successfully")
                 
-            except Exception as extract_error:
-                print(f"❌ Error during extraction/download: {extract_error}")
-                raise extract_error
+        except Exception as primary_error:
+            print(f"❌ Primary method failed: {primary_error}")
+            
+            # Try fallback method with different settings
+            print("🔄 Trying fallback method...")
+            fallback_opts = ydl_opts.copy()
+            fallback_opts.update({
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android'],
+                        'skip': ['webpage'],
+                    }
+                },
+                'user_agent': 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
+                'sleep_interval': 5,
+            })
+            
+            try:
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                    print(f"📱 Trying Android client extraction...")
+                    info = ydl_fallback.extract_info(url, download=False)
+                    video_title = info.get('title', 'video')
+                    print(f"🎬 Video title: {video_title}")
+                    
+                    print(f"⬇️  Starting fallback download...")
+                    ydl_fallback.download([url])
+                    print(f"✅ Fallback download completed successfully")
+                    
+            except Exception as fallback_error:
+                print(f"❌ Fallback method also failed: {fallback_error}")
+                # Raise the original error for better debugging
+                raise primary_error
         
         # Return success response with title
         return jsonify({
@@ -797,7 +854,15 @@ def download_video():
         })
         
     except yt_dlp.DownloadError as e:
-        return jsonify({'error': f'Download error: {str(e)}'}), 400
+        error_msg = str(e)
+        if "Sign in to confirm you're not a bot" in error_msg:
+            return jsonify({'error': 'YouTube bot detection triggered. Please try: 1) Update your cookies.txt file with fresh login cookies, 2) Wait a few minutes before trying again, 3) Try a different video first'}), 400
+        elif "HTTP Error 403: Forbidden" in error_msg:
+            return jsonify({'error': 'YouTube blocked the request (403 Forbidden). Solutions: 1) Wait 10-15 minutes before trying again, 2) Update yt-dlp: pip install --upgrade yt-dlp, 3) Try a different video, 4) Use fresh cookies.txt from your browser'}), 400
+        elif "This video is unavailable" in error_msg:
+            return jsonify({'error': 'This video is unavailable (private, deleted, or region-blocked)'}), 400
+        else:
+            return jsonify({'error': f'Download error: {error_msg}'}), 400
     except Exception as e:
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
