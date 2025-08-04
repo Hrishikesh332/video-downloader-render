@@ -782,11 +782,14 @@ def download_video():
             'sleep_interval': 2,
             'max_sleep_interval': 10,
             'sleep_interval_subtitles': 2,
-            # Additional bypass options
+            # Enhanced bypass options
             'extractor_args': {
                 'youtube': {
                     'skip': ['dash', 'hls'],
-                    'player_client': ['android', 'web'],
+                    'player_client': ['android', 'web', 'tv_embedded'],
+                    'player_skip': ['configs'],
+                    'comment_sort': ['top'],
+                    'max_comments': [20, 100, 200, 500]
                 }
             },
         }
@@ -816,33 +819,88 @@ def download_video():
         except Exception as primary_error:
             print(f"❌ Primary method failed: {primary_error}")
             
-            # Try fallback method with different settings
-            print("🔄 Trying fallback method...")
-            fallback_opts = ydl_opts.copy()
-            fallback_opts.update({
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android'],
-                        'skip': ['webpage'],
+            # Try multiple fallback methods
+            fallback_methods = [
+                {
+                    'name': 'Android Client',
+                    'icon': '📱',
+                    'opts': {
+                        'extractor_args': {
+                            'youtube': {
+                                'player_client': ['android'],
+                                'skip': ['webpage', 'dash', 'hls'],
+                            }
+                        },
+                        'user_agent': 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
+                        'http_headers': {
+                            'User-Agent': 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
+                            'X-YouTube-Client-Name': '3',
+                            'X-YouTube-Client-Version': '17.31.35',
+                        }
                     }
                 },
-                'user_agent': 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
-                'sleep_interval': 5,
-            })
+                {
+                    'name': 'TV Embedded Client',
+                    'icon': '📺',
+                    'opts': {
+                        'extractor_args': {
+                            'youtube': {
+                                'player_client': ['tv_embedded'],
+                                'skip': ['webpage'],
+                            }
+                        },
+                        'user_agent': 'Mozilla/5.0 (PlayStation 4 5.55) AppleWebKit/537.78 (KHTML, like Gecko)',
+                    }
+                },
+                {
+                    'name': 'iOS Client',
+                    'icon': '📱',
+                    'opts': {
+                        'extractor_args': {
+                            'youtube': {
+                                'player_client': ['ios'],
+                                'skip': ['webpage'],
+                            }
+                        },
+                        'user_agent': 'com.google.ios.youtube/17.33.2 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)',
+                        'http_headers': {
+                            'User-Agent': 'com.google.ios.youtube/17.33.2 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)',
+                            'X-YouTube-Client-Name': '5',
+                            'X-YouTube-Client-Version': '17.33.2',
+                        }
+                    }
+                }
+            ]
             
-            try:
-                with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
-                    print(f"📱 Trying Android client extraction...")
-                    info = ydl_fallback.extract_info(url, download=False)
-                    video_title = info.get('title', 'video')
-                    print(f"🎬 Video title: {video_title}")
+            success = False
+            for method in fallback_methods:
+                if success:
+                    break
                     
-                    print(f"⬇️  Starting fallback download...")
-                    ydl_fallback.download([url])
-                    print(f"✅ Fallback download completed successfully")
-                    
-            except Exception as fallback_error:
-                print(f"❌ Fallback method also failed: {fallback_error}")
+                print(f"🔄 Trying {method['name']}...")
+                fallback_opts = ydl_opts.copy()
+                fallback_opts.update(method['opts'])
+                fallback_opts['sleep_interval'] = 5
+                
+                try:
+                    with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                        print(f"{method['icon']} Extracting with {method['name']}...")
+                        info = ydl_fallback.extract_info(url, download=False)
+                        video_title = info.get('title', 'video')
+                        print(f"🎬 Video title: {video_title}")
+                        
+                        print(f"⬇️  Starting download with {method['name']}...")
+                        ydl_fallback.download([url])
+                        print(f"✅ Download completed successfully with {method['name']}")
+                        success = True
+                        break
+                        
+                except Exception as method_error:
+                    print(f"❌ {method['name']} failed: {method_error}")
+                    continue
+            
+            if not success:
+                print(f"❌ All fallback methods failed")
                 # Raise the original error for better debugging
                 raise primary_error
         
@@ -857,6 +915,8 @@ def download_video():
         error_msg = str(e)
         if "Sign in to confirm you're not a bot" in error_msg:
             return jsonify({'error': 'YouTube bot detection triggered. Please try: 1) Update your cookies.txt file with fresh login cookies, 2) Wait a few minutes before trying again, 3) Try a different video first'}), 400
+        elif "Failed to extract any player response" in error_msg:
+            return jsonify({'error': 'YouTube player extraction failed. This is a new type of blocking. Solutions: 1) Wait 30+ minutes before trying again, 2) Try a different video, 3) Update cookies.txt with fresh browser cookies, 4) The app tried multiple fallback methods automatically'}), 400
         elif "HTTP Error 403: Forbidden" in error_msg:
             return jsonify({'error': 'YouTube blocked the request (403 Forbidden). Solutions: 1) Wait 10-15 minutes before trying again, 2) Update yt-dlp: pip install --upgrade yt-dlp, 3) Try a different video, 4) Use fresh cookies.txt from your browser'}), 400
         elif "This video is unavailable" in error_msg:
