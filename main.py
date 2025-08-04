@@ -732,6 +732,13 @@ def download_video():
         if not url:
             return jsonify({'error': 'YouTube URL is required'}), 400
         
+        # Debug: Log the URL being processed
+        print(f"🔍 Processing URL: {url}")
+        
+        # Validate YouTube URL
+        if not is_valid_youtube_url(url):
+            return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
+        
         # Clean up old files in background
         threading.Thread(target=cleanup_old_files, daemon=True).start()
         
@@ -749,6 +756,12 @@ def download_video():
             'keepvideo': False if quality == 'audio' else True,
             'writeinfojson': False,
             'writesubtitles': False,
+            # Additional options to avoid connection issues
+            'socket_timeout': 30,
+            'retries': 3,
+            'fragment_retries': 3,
+            'no_warnings': False,
+            'ignoreerrors': False,
         }
         
         # Use cookies if available (OPTIONAL)
@@ -760,12 +773,21 @@ def download_video():
         
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Extract info first to get title
-            info = ydl.extract_info(url, download=False)
-            video_title = info.get('title', 'video')
-            
-            # Download the video
-            ydl.download([url])
+            try:
+                # Extract info first to get title
+                print(f"📺 Extracting video info from: {url}")
+                info = ydl.extract_info(url, download=False)
+                video_title = info.get('title', 'video')
+                print(f"🎬 Video title: {video_title}")
+                
+                # Download the video
+                print(f"⬇️  Starting download...")
+                ydl.download([url])
+                print(f"✅ Download completed successfully")
+                
+            except Exception as extract_error:
+                print(f"❌ Error during extraction/download: {extract_error}")
+                raise extract_error
         
         # Return success response with title
         return jsonify({
