@@ -105,11 +105,6 @@
             color: white;
         }
 
-        .btn-quick {
-            background: #9f7aea;
-            color: white;
-        }
-
         .btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
@@ -225,9 +220,6 @@
             <button class="btn btn-audio" onclick="downloadAudio()">
                 🎵 Download Audio
             </button>
-            <button class="btn btn-quick" onclick="quickAudioDownload()" title="Fast download with minimal quality for testing">
-                ⚡ Quick Audio
-            </button>
         </div>
         
         <div class="loading" id="loading">
@@ -239,8 +231,8 @@
         
         <div class="footer">
             <p>Enter a YouTube URL above and choose an action</p>
-            <p><strong>Tip:</strong> Try "Quick Audio" first for fast testing on cloud deployments</p>
-            <p>Powered by yt-dlp API • Optimized for cloud deployment</p>
+            <p><strong>New:</strong> Background downloads bypass cloud timeout limits!</p>
+            <p>Powered by yt-dlp API • Background processing for Render deployment</p>
         </div>
     </div>
 
@@ -319,74 +311,97 @@
             }
         }
 
-        async function downloadVideo() {
+        async function startBackgroundDownload(type) {
             const url = getVideoUrl();
             if (!url) return;
 
-            showLoading('Downloading video...');
+            showLoading(`Starting ${type} download...`);
 
             try {
-                const response = await fetch(`/download_video?url=${encodeURIComponent(url)}`);
-                
+                const response = await fetch('/start_download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        type: type
+                    })
+                });
+
+                const data = await response.json();
+
                 if (response.ok) {
-                    const blob = await response.blob();
-                    const filename = getFilenameFromResponse(response) || 'video.mp4';
-                    downloadBlob(blob, filename);
-                    showSuccess('Video downloaded successfully!');
+                    pollDownloadStatus(data.job_id, type);
                 } else {
-                    const errorData = await response.json();
-                    showError(errorData.error || 'Failed to download video');
+                    showError(data.error || `Failed to start ${type} download`);
                 }
             } catch (error) {
                 showError('Network error: ' + error.message);
             }
+        }
+
+        async function pollDownloadStatus(jobId, type) {
+            const maxPollingTime = 180000; // 3 minutes max
+            const pollInterval = 2000; // Check every 2 seconds
+            const startTime = Date.now();
+
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/download_status/${jobId}`);
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        showError(data.error || 'Download job not found');
+                        return;
+                    }
+
+                    // Update loading message
+                    document.getElementById('loadingText').textContent = data.message;
+
+                    if (data.status === 'completed') {
+                        // Download is ready
+                        showLoading('Download ready! Starting file download...');
+                        
+                        // Trigger file download
+                        const downloadResponse = await fetch(data.download_url);
+                        if (downloadResponse.ok) {
+                            const blob = await downloadResponse.blob();
+                            const filename = getFilenameFromResponse(downloadResponse) || `${type}.${type === 'video' ? 'mp4' : 'mp3'}`;
+                            downloadBlob(blob, filename);
+                            showSuccess(`${type.charAt(0).toUpperCase() + type.slice(1)} downloaded successfully!`);
+                        } else {
+                            showError('Failed to download the completed file');
+                        }
+                        return;
+                    } else if (data.status === 'failed') {
+                        showError(data.message + (data.error_details ? ` Details: ${data.error_details}` : ''));
+                        return;
+                    } else {
+                        // Still processing, continue polling
+                        if (Date.now() - startTime < maxPollingTime) {
+                            setTimeout(poll, pollInterval);
+                        } else {
+                            showError('Download timed out after 3 minutes. Please try a shorter video.');
+                        }
+                    }
+                } catch (error) {
+                    showError('Error checking download status: ' + error.message);
+                }
+            };
+
+            poll();
+        }
+
+        async function downloadVideo() {
+            await startBackgroundDownload('video');
         }
 
         async function downloadAudio() {
-            const url = getVideoUrl();
-            if (!url) return;
-
-            showLoading('Downloading audio...');
-
-            try {
-                const response = await fetch(`/download_audio?url=${encodeURIComponent(url)}`);
-                
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const filename = getFilenameFromResponse(response) || 'audio.mp3';
-                    downloadBlob(blob, filename);
-                    showSuccess('Audio downloaded successfully!');
-                } else {
-                    const errorData = await response.json();
-                    showError(errorData.error || 'Failed to download audio');
-                }
-            } catch (error) {
-                showError('Network error: ' + error.message);
-            }
+            await startBackgroundDownload('audio');
         }
 
-        async function quickAudioDownload() {
-            const url = getVideoUrl();
-            if (!url) return;
 
-            showLoading('Quick audio download (minimal quality)...');
-
-            try {
-                const response = await fetch(`/quick_audio?url=${encodeURIComponent(url)}`);
-                
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const filename = getFilenameFromResponse(response) || 'audio.m4a';
-                    downloadBlob(blob, filename);
-                    showSuccess('Quick audio downloaded successfully! (Minimal quality for testing)');
-                } else {
-                    const errorData = await response.json();
-                    showError(errorData.error || 'Quick audio download failed');
-                }
-            } catch (error) {
-                showError('Network error: ' + error.message);
-            }
-        }
 
         function getFilenameFromResponse(response) {
             const contentDisposition = response.headers.get('content-disposition');
