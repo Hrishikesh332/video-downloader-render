@@ -105,6 +105,67 @@
             color: white;
         }
 
+        .btn-public {
+            background: #68d391;
+            color: white;
+        }
+
+        .public-mode {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+        }
+
+        .public-mode p {
+            margin-bottom: 15px;
+            color: #4a5568;
+            font-size: 14px;
+        }
+
+        .help-section {
+            margin: 30px 0;
+            padding: 25px;
+            background: #fff5f5;
+            border-radius: 8px;
+            border: 1px solid #feb2b2;
+            text-align: left;
+        }
+
+        .help-section h3 {
+            color: #c53030;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .help-section ol {
+            margin: 15px 0;
+            padding-left: 25px;
+        }
+
+        .help-section li {
+            margin-bottom: 8px;
+            color: #4a5568;
+            line-height: 1.5;
+        }
+
+        .help-section code {
+            background: #edf2f7;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .help-section p {
+            margin-top: 15px;
+            text-align: center;
+            font-weight: 500;
+            color: #2d3748;
+        }
+
         .btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
@@ -222,12 +283,36 @@
             </button>
         </div>
         
+        <div class="public-mode">
+            <p><strong>Having cookie issues?</strong> Try public mode for completely public videos:</p>
+            <div class="button-group">
+                <button class="btn btn-public" onclick="downloadPublicAudio()" title="Download without cookies - works only for public videos">
+                    🔓 Public Audio
+                </button>
+                <button class="btn btn-public" onclick="downloadPublicVideo()" title="Download without cookies - works only for public videos">
+                    🔓 Public Video
+                </button>
+            </div>
+        </div>
+        
         <div class="loading" id="loading">
             <div class="spinner"></div>
             <span id="loadingText">Processing...</span>
         </div>
         
         <div class="result" id="result"></div>
+        
+        <div class="help-section">
+            <h3>🍪 Need Cookies for Restricted Videos?</h3>
+            <ol>
+                <li><strong>Install a browser extension:</strong> "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)</li>
+                <li><strong>Go to YouTube:</strong> Log into your YouTube account</li>
+                <li><strong>Export cookies:</strong> Use the extension to download cookies.txt</li>
+                <li><strong>Upload to Render:</strong> Go to your Render dashboard → Environment → Secret Files → Upload cookies.txt</li>
+                <li><strong>Mount path:</strong> Set mount path to <code>/etc/secrets/cookies.txt</code></li>
+            </ol>
+            <p><strong>No cookies needed?</strong> Try the Public mode buttons above for completely public videos!</p>
+        </div>
         
         <div class="footer">
             <p>Enter a YouTube URL above and choose an action</p>
@@ -375,7 +460,14 @@
                         }
                         return;
                     } else if (data.status === 'failed') {
-                        showError(data.message + (data.error_details ? ` Details: ${data.error_details}` : ''));
+                        let errorMsg = data.message;
+                        if (data.error_details) {
+                            errorMsg += ` Details: ${data.error_details}`;
+                        }
+                        if (data.help) {
+                            errorMsg += `<br><br><strong>Solution:</strong> ${data.help}`;
+                        }
+                        showError(errorMsg);
                         return;
                     } else {
                         // Still processing, continue polling
@@ -399,6 +491,44 @@
 
         async function downloadAudio() {
             await startBackgroundDownload('audio');
+        }
+
+        async function startPublicDownload(type) {
+            const url = getVideoUrl();
+            if (!url) return;
+
+            showLoading(`Starting public ${type} download (no cookies)...`);
+
+            try {
+                const response = await fetch('/start_public_download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        type: type
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    pollDownloadStatus(data.job_id, type);
+                } else {
+                    showError(data.error || `Failed to start public ${type} download`);
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        async function downloadPublicAudio() {
+            await startPublicDownload('audio');
+        }
+
+        async function downloadPublicVideo() {
+            await startPublicDownload('video');
         }
 
 

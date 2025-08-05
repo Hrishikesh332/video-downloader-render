@@ -22,6 +22,66 @@ if not os.path.exists(TEMP_DOWNLOAD_BASE_DIR):
 def home():
     return render_template('index.html')
 
+def background_download_no_cookies(job_id, video_url, download_type):
+    """Background download function without cookies for public videos"""
+    try:
+        download_jobs[job_id]['status'] = 'processing'
+        download_jobs[job_id]['message'] = 'Starting public download (no cookies)...'
+        
+        specific_download_dir = download_jobs[job_id]['download_dir']
+        output_template = os.path.join(specific_download_dir, "%(title)s - %(id)s.%(ext)s")
+        
+        # Basic settings without any authentication
+        command = [
+            'yt-dlp',
+            '--no-warnings',
+            '--quiet',
+            '--socket-timeout', '10',
+            '--retries', '1',
+            '--fragment-retries', '1',
+            '--no-playlist',
+            '--max-filesize', '10M',  # Smaller limit for public downloads
+            '--output', output_template,
+            '--user-agent', 'Mozilla/5.0 (compatible; bot)',  # Simple user agent
+            '--no-check-certificate'
+        ]
+        
+        # Add format selection
+        if download_type == 'video':
+            command.extend(['-f', 'worst[height<=240]/worst'])  # Very low quality for public mode
+        elif download_type == 'audio':
+            command.extend(['-f', 'worstaudio'])  # No conversion, just raw audio
+        
+        command.append(video_url)
+        
+        download_jobs[job_id]['message'] = 'Downloading without authentication...'
+        
+        # Run with shorter timeout for public mode
+        process = subprocess.run(command, capture_output=True, text=True, timeout=15)
+        
+        downloaded_files = os.listdir(specific_download_dir)
+        if downloaded_files and process.returncode == 0:
+            download_jobs[job_id]['status'] = 'completed'
+            download_jobs[job_id]['filename'] = downloaded_files[0]
+            download_jobs[job_id]['message'] = 'Public download completed!'
+        else:
+            download_jobs[job_id]['status'] = 'failed'
+            stderr_text = process.stderr if process.stderr else 'Unknown error'
+            
+            if 'private' in stderr_text.lower() or 'unavailable' in stderr_text.lower():
+                download_jobs[job_id]['message'] = 'Video is private/restricted. Try normal download with cookies.'
+                download_jobs[job_id]['error'] = 'Requires authentication'
+            else:
+                download_jobs[job_id]['message'] = 'Public download failed. Video may require authentication.'
+                download_jobs[job_id]['error'] = stderr_text[-200:] if stderr_text else 'Unknown error'
+                
+    except subprocess.TimeoutExpired:
+        download_jobs[job_id]['status'] = 'failed'
+        download_jobs[job_id]['message'] = 'Public download timed out. Try normal download.'
+    except Exception as e:
+        download_jobs[job_id]['status'] = 'failed'
+        download_jobs[job_id]['message'] = f'Public download error: {str(e)}'
+
 def background_download(job_id, video_url, download_type):
     """Background download function that runs in a separate thread"""
     try:
@@ -59,6 +119,9 @@ def background_download(job_id, video_url, download_type):
         temp_cookie_path = get_cookie_path()
         if temp_cookie_path:
             command.extend(['--cookies', temp_cookie_path])
+            download_jobs[job_id]['using_cookies'] = True
+        else:
+            download_jobs[job_id]['using_cookies'] = False
         
         command.append(video_url)
         
@@ -74,8 +137,28 @@ def background_download(job_id, video_url, download_type):
             download_jobs[job_id]['message'] = 'Download completed successfully!'
         else:
             download_jobs[job_id]['status'] = 'failed'
-            download_jobs[job_id]['message'] = 'Download failed. Try a shorter video or different format.'
-            download_jobs[job_id]['error'] = process.stderr[-200:] if process.stderr else 'Unknown error'
+            stderr_text = process.stderr if process.stderr else 'Unknown error'
+            
+            # Provide specific error messages based on stderr content
+            if 'cookies' in stderr_text.lower() or 'sign in to confirm' in stderr_text.lower():
+                download_jobs[job_id]['message'] = 'YouTube requires cookies for this video. Please add fresh cookies.txt file.'
+                download_jobs[job_id]['error'] = 'Cookie authentication required'
+                download_jobs[job_id]['help'] = 'Export cookies from your browser and upload to Render secrets'
+            elif 'age-restricted' in stderr_text.lower():
+                download_jobs[job_id]['message'] = 'Age-restricted video requires authentication. Add cookies.txt file.'
+                download_jobs[job_id]['error'] = 'Age restriction detected'
+            elif 'private' in stderr_text.lower() or 'unavailable' in stderr_text.lower():
+                download_jobs[job_id]['message'] = 'Video is private, deleted, or unavailable.'
+                download_jobs[job_id]['error'] = 'Video access denied'
+            elif 'timeout' in stderr_text.lower():
+                download_jobs[job_id]['message'] = 'Download timed out. Try a shorter video.'
+                download_jobs[job_id]['error'] = 'Network timeout'
+            elif 'file size' in stderr_text.lower():
+                download_jobs[job_id]['message'] = 'Video file too large (>15MB limit). Try audio download.'
+                download_jobs[job_id]['error'] = 'File size exceeded'
+            else:
+                download_jobs[job_id]['message'] = 'Download failed. Try a different video or format.'
+                download_jobs[job_id]['error'] = stderr_text[-300:] if stderr_text else 'Unknown error'
             
     except subprocess.TimeoutExpired:
         download_jobs[job_id]['status'] = 'failed'
@@ -340,10 +423,19 @@ def download_status(job_id):
         "type": job['type']
     }
     
+    # Add extra info for debugging
+    if 'using_cookies' in job:
+        response['using_cookies'] = job['using_cookies']
+    if 'public_mode' in job:
+        response['public_mode'] = job['public_mode']
+    
     if job['status'] == 'completed':
         response['download_url'] = f"/download_file/{job_id}"
-    elif job['status'] == 'failed' and 'error' in job:
-        response['error_details'] = job['error']
+    elif job['status'] == 'failed':
+        if 'error' in job:
+            response['error_details'] = job['error']
+        if 'help' in job:
+            response['help'] = job['help']
     
     return jsonify(response)
 
@@ -406,7 +498,65 @@ def download_audio_route():
 def test_download():
     """Test endpoint with a known working video"""
     test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll - should always work
-    return handle_download(test_url, 'audio')
+    
+    # Start background download
+    job_id = str(uuid.uuid4())
+    specific_download_dir = os.path.join(TEMP_DOWNLOAD_BASE_DIR, job_id)
+    os.makedirs(specific_download_dir, exist_ok=True)
+    
+    download_jobs[job_id] = {
+        'status': 'queued',
+        'message': 'Testing with known working video...',
+        'download_dir': specific_download_dir,
+        'created_at': time.time(),
+        'type': 'audio',
+        'url': test_url
+    }
+    
+    thread = threading.Thread(target=background_download, args=(job_id, test_url, 'audio'))
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        "job_id": job_id,
+        "message": "Test download started",
+        "check_status_url": f"/download_status/{job_id}"
+    })
+
+@app.route('/start_public_download', methods=['POST'])
+def start_public_download():
+    """Start download without cookies for public videos only"""
+    data = request.get_json()
+    video_url = data.get('url')
+    download_type = data.get('type', 'audio')
+    
+    if not video_url:
+        return jsonify({"error": "Missing 'url' parameter"}), 400
+    
+    job_id = str(uuid.uuid4())
+    specific_download_dir = os.path.join(TEMP_DOWNLOAD_BASE_DIR, job_id)
+    os.makedirs(specific_download_dir, exist_ok=True)
+    
+    download_jobs[job_id] = {
+        'status': 'queued',
+        'message': 'Starting public download (no cookies)...',
+        'download_dir': specific_download_dir,
+        'created_at': time.time(),
+        'type': download_type,
+        'url': video_url,
+        'public_mode': True
+    }
+    
+    # Start background download without cookies
+    thread = threading.Thread(target=background_download_no_cookies, args=(job_id, video_url, download_type))
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        "job_id": job_id,
+        "status": "queued",
+        "message": "Public download started (no authentication)"
+    })
 
 @app.route('/jobs')
 def list_jobs():
